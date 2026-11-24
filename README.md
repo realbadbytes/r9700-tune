@@ -1,5 +1,14 @@
 # r9700-tune
 
+> **This fork vs. the original ([arczewski/r9700-tune](https://github.com/arczewski/r9700-tune)):**
+> adds **`module/fan-only/`** — a standalone kernel module (`r9700_fan.ko`)
+> that captures the SMU overdrive table and applies *fan control only*
+> (fan curve, acoustic target/limit RPM, min PWM, target temp) via kprobes.
+> It deliberately leaves clocks and power limits untouched, so it can run
+> where clock/power tuning is not wanted or would conflict with other
+> tooling, and without building the main `r9700_tune.ko`. Everything else
+> is identical to upstream.
+
 Tools to make an AMD Radeon AI PRO R9700 (Navi 48, SMU 14.0.2) quiet on
 Linux/Unraid: cap the maximum GPU clock while keeping the automatic DPM
 range, lower the power limit below the 210 W floor, and apply a custom fan
