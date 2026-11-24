@@ -1,13 +1,32 @@
 # r9700-tune
 
-> **This fork vs. the original ([arczewski/r9700-tune](https://github.com/arczewski/r9700-tune)):**
-> adds **`module/fan-only/`** — a standalone kernel module (`r9700_fan.ko`)
-> that captures the SMU overdrive table and applies *fan control only*
-> (fan curve, acoustic target/limit RPM, min PWM, target temp) via kprobes.
-> It deliberately leaves clocks and power limits untouched, so it can run
-> where clock/power tuning is not wanted or would conflict with other
-> tooling, and without building the main `r9700_tune.ko`. Everything else
-> is identical to upstream.
+> ## This fork vs. the original ([arczewski/r9700-tune](https://github.com/arczewski/r9700-tune))
+>
+> Everything upstream is kept as-is; this fork adds **`module/fan-only/`** —
+> a standalone `r9700_fan.ko` written for **our kernel** (Ubuntu
+> `7.0.0-43-generic`), fan/overdrive-table only. It deliberately contains
+> **no clock, power or voltage code at all** (no `sclk_max`, `mclk_max`,
+> `ppt_offset`, `vddgfx_offset`), so it can coexist with other tuning
+> tooling. Specific things that do not exist upstream:
+>
+> - **Automatic SMU instance capture** — upstream requires you to find and
+>   pass non-exported symbol addresses (`adev_addr` / `fn_addr` /
+>   `fan_fn_addr`) yourself. This module instead captures the live
+>   `smu_device` pointer with a kprobe on `smu_get_fan_speed_rpm`
+>   (`capture_armed` / `capture_done`, optional `capture_pid` filter to
+>   trigger it from a chosen process) and resolves `smu_update_table`
+>   through a kprobe on `kallsyms_lookup_name` (unexported since v6.4).
+> - **`fan_inspect`** — dumps the current overdrive fan settings for
+>   read-back/debugging.
+> - **`target_temp_only`** — changes only the fan target temperature,
+>   leaving curve and acoustic limits untouched.
+> - **`hotspot_curve_apply`** — writes a hotspot(junction)-based 6-point
+>   PWM curve (40–90 °C) with manual-linear fan mode, then **re-reads and
+>   verifies the table** (fails with `-EIO` on any mismatch, preserving
+>   existing acoustic target/limit and target temp).
+>
+> Everything else — the Go `r9700-tune` CLI and the main `r9700_tune.ko` —
+> is byte-identical to upstream.
 
 Tools to make an AMD Radeon AI PRO R9700 (Navi 48, SMU 14.0.2) quiet on
 Linux/Unraid: cap the maximum GPU clock while keeping the automatic DPM
