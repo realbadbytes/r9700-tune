@@ -2,3 +2,11 @@ patched_pp_table.bin
 r9700-tune
 dist/
 module/r9700_tune.ko
+module/fan-only/*.o
+module/fan-only/*.ko
+module/fan-only/*.mod
+module/fan-only/*.mod.c
+module/fan-only/Module.symvers
+module/fan-only/modules.order
+module/fan-only/*.previous
+module/fan-only/.*.cmd
