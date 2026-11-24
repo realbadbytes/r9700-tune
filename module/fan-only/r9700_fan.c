@@ -2,6 +2,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/kprobes.h>
+#include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/unaligned.h>
 #include <linux/ptrace.h>
@@ -367,7 +368,7 @@ static int apply_hotspot_curve(void)
 	u16 old_target, old_acoustic_target;
 	u16 old_acoustic_limit, old_min_pwm;
 	void *smu = READ_ONCE(smu_ptr);
-	int ret;
+	int ret, attempt, read_ret;
 
 	if (!update_fn || !smu)
 		return -ENODEV;
@@ -377,8 +378,10 @@ static int apply_hotspot_curve(void)
 		return -ENOMEM;
 
 	ret = update_fn(smu, SMU_TABLE_OVERDRIVE, 0, table, false);
-	if (ret)
+	if (ret) {
+		pr_err("r9700_fan: hotspot: reading OD table failed: %d\n", ret);
 		goto out;
+	}
 
 	old_min_pwm = get_unaligned_le16(table + OD_MIN_PWM_OFFSET);
 	old_acoustic_target = get_unaligned_le16(table + OD_AC_TARGET_OFFSET);
@@ -396,14 +399,38 @@ static int apply_hotspot_curve(void)
 	table[OD_FAN_MODE_OFFSET] = FAN_MODE_MANUAL_LINEAR;
 	put_unaligned_le32(mask, table);
 
+	/* The SMU may return CMD_FAIL (-EIO) on the transfer message even
+	 * though it commits the table, e.g. while under active power
+	 * management. The read-back is ground truth: verify with short
+	 * retries and only trust the ack when it says success.
+	 */
 	ret = update_fn(smu, SMU_TABLE_OVERDRIVE, 0, table, true);
 	if (ret)
-		goto out;
+		pr_warn("r9700_fan: hotspot: SMU upload returned %d, verifying firmware state\n",
+			ret);
 
-	memset(table, 0, PAGE_SIZE);
-	ret = update_fn(smu, SMU_TABLE_OVERDRIVE, 0, table, false);
-	if (ret)
+	read_ret = -EIO;
+	for (attempt = 0; attempt < 3; attempt++) {
+		if (attempt)
+			usleep_range(20000, 30000);
+		memset(table, 0, PAGE_SIZE);
+		read_ret = update_fn(smu, SMU_TABLE_OVERDRIVE, 0, table, false);
+		if (!read_ret) {
+			if (attempt)
+				pr_info("r9700_fan: hotspot: readback succeeded on attempt %d\n",
+					attempt + 1);
+			break;
+		}
+		pr_warn("r9700_fan: hotspot: readback attempt %d failed: %d\n",
+			attempt + 1, read_ret);
+	}
+
+	if (read_ret) {
+		pr_err("r9700_fan: hotspot: readback failed after retries: %d (upload returned %d)\n",
+			read_ret, ret);
+		ret = read_ret;
 		goto out;
+	}
 
 	if (!(get_unaligned_le32(table) & BIT(OD_FAN_CURVE_BIT)) ||
 	    (get_unaligned_le32(table) & BIT(OD_FAN_LEGACY_BIT)) ||
@@ -413,12 +440,25 @@ static int apply_hotspot_curve(void)
 	    get_unaligned_le16(table + OD_AC_TARGET_OFFSET) != old_acoustic_target ||
 	    get_unaligned_le16(table + OD_AC_LIMIT_OFFSET) != old_acoustic_limit ||
 	    get_unaligned_le16(table + OD_TARGET_TEMP) != old_target) {
-		pr_err("r9700_fan: hotspot curve readback verification failed\n");
+		pr_err("r9700_fan: hotspot: readback does not match requested settings (upload returned %d)\n",
+			ret);
 		ret = -EIO;
 		goto out;
 	}
 
-	pr_info("r9700_fan: hotspot curve verified: 40:25 50:30 60:40 70:60 80:80 90:100; existing target and acoustic settings preserved\n");
+	/* Firmware state is authoritative: an -EIO ack with a fully
+	 * matching read-back means the table was committed anyway. */
+	if (ret) {
+		pr_warn("r9700_fan: hotspot: upload ack failed (%d) but firmware table matches; treating as applied\n",
+			ret);
+		ret = 0;
+	}
+
+	pr_info("r9700_fan: hotspot curve verified: %u:%u %u:%u %u:%u %u:%u %u:%u %u:%u; target=%u C acoustic=%u/%u minPWM=%u preserved\n",
+		temps[0], pwm[0], temps[1], pwm[1], temps[2], pwm[2],
+		temps[3], pwm[3], temps[4], pwm[4], temps[5], pwm[5],
+		old_target, old_acoustic_target, old_acoustic_limit,
+		old_min_pwm);
 
 out:
 	kfree(table);

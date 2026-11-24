@@ -7,7 +7,7 @@ Adds `module/fan-only/`: a standalone fan-only kernel module (`r9700_fan.ko`), b
 - **Automatic SMU discovery**: resolves symbols at runtime via kprobes (`smu_get_fan_speed_rpm` capture, `kallsyms_lookup_name`), replacing upstream's manual `adev_addr`/`fn_addr` parameters.
 - `fan_inspect` — dump the active overdrive fan settings.
 - `target_temp_only` — set the fan target temperature without altering curve or acoustic limits.
-- `hotspot_curve_apply` — apply a six-point hotspot PWM curve (40–90 °C, manual linear mode) and verify it via SMU read-back (`-EIO` on mismatch); existing acoustic and target settings are preserved.
+- `hotspot_curve_apply` — apply a six-point hotspot PWM curve (40–90 °C, manual linear mode) and verify it via SMU read-back with short retries; the read-back is authoritative, so a failed transfer ack (`-EIO` / `SMU_RESP_CMD_FAIL`, observed under live GPU load) with a fully matching table is reported as applied. Existing acoustic and target settings are preserved.
 
 The Go CLI and the main `r9700_tune.ko` are unchanged.
 
